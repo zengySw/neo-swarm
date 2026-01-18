@@ -216,6 +216,11 @@ end)
 -- ====== Farm loop (no twitching) ======
 _G.__FARMING = false
 
+
+_G.GetSpeed = function()
+	return currentSpeed
+end
+
 local TARGET_SWITCH_COOLDOWN = 0.6
 local currentTarget = nil
 local lastSwitch = 0

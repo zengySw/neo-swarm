@@ -42,7 +42,8 @@ end)
 local speedLabel = Instance.new("TextLabel", frame)
 speedLabel.Position = UDim2.fromOffset(10, 40)
 speedLabel.Size = UDim2.new(1,-20,0,20)
-speedLabel.Text = "Speed: 16"
+local xd = "Speed: "..(typeof(_G.GetSpeed) == "function" and tostring(_G.GetSpeed()) or "error")
+speedLabel.Text = xd
 speedLabel.BackgroundTransparency = 1
 speedLabel.TextColor3 = Color3.fromRGB(200,200,200)
 
