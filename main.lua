@@ -190,7 +190,9 @@ local function approachObject(obj)
 end
 
 -- ====== Speed control (loop apply) ======
-local currentSpeed = 16
+local currentSpeed = humanoid.WalkSpeed
+local DEFAULT_WALKSPEED = currentSpeed
+
 
 local function setSpeed(v)
 	v = tonumber(v)
