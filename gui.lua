@@ -40,9 +40,7 @@ close.MouseButton1Click:Connect(function()
 	end
 	gui:Destroy()
 end)
-local function round1(x)
-	return math.floor(x * 10) / 10
-end
+
 
 local speedLabel = Instance.new("TextLabel", frame)
 speedLabel.Position = UDim2.fromOffset(10, 40)

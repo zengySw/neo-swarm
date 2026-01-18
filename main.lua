@@ -190,9 +190,14 @@ local function approachObject(obj)
 end
 
 -- ====== Speed control (loop apply) ======
+local function round1(x)
+	return math.floor(x * 10) / 10
+end
 local DEFAULT_WALKSPEED = 16
 	if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
-local currentSpeed = DEFAULT_WALKSPEED 
+local currentSpeed = round1(DEFAULT_WALKSPEED)
+
+
 
 
 _G.GetSpeed = function() return currentSpeed end
