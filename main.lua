@@ -4,7 +4,6 @@ local UserInputService = game:GetService("UserInputService")
 local tokens = workspace:WaitForChild("Collectibles")
 local player = Players.LocalPlayer
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/zengySw/neo-swarm/main/gui.lua"))()
 
 -- ====== ZONE SETTINGS ======
 local X1, X2 = -102.6, 39.3
@@ -234,3 +233,6 @@ end
 local function stopFarm()
 	_G.__FARMING = false
 end
+
+_G.StartFarm = startFarm
+_G.StopFarm  = stopFarm
