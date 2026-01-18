@@ -313,6 +313,5 @@ end
 _G.StartFarm = startFarm
 _G.StopFarm = stopFarm
 _G.SetSpeed = setSpeed
-_G.getSpeed = getSpeed
 _G.GetState = getState
 _G.ResetAll = resetAll

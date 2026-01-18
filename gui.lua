@@ -46,6 +46,10 @@ local speedLabel = Instance.new("TextLabel", frame)
 speedLabel.Position = UDim2.fromOffset(10, 40)
 speedLabel.Size = UDim2.new(1,-20,0,20)
 
+local function round1(x)
+	return math.floor(x * 10) / 10
+end
+
 local speedText = "Speed: "
 
 if typeof(_G.GetSpeed) == "function" then
