@@ -190,19 +190,31 @@ local function approachObject(obj)
 end
 
 -- ====== Speed control (loop apply) ======
-local currentSpeed = humanoid.WalkSpeed
-local DEFAULT_WALKSPEED = currentSpeed
+local DEFAULT_WALKSPEED = 16
+local currentSpeed = DEFAULT_WALKSPEED
+
+if humanoid then
+	DEFAULT_WALKSPEED = humanoid.WalkSpeed
+	currentSpeed = DEFAULT_WALKSPEED
+end
 
 
+-- вызывается из GUI
 local function setSpeed(v)
 	v = tonumber(v)
-	if not v then return warn("error setting speed") end
-	while true do
-		currentSpeed = v
-		task.wait(0.01)
-	end
-	if humanoid then humanoid.WalkSpeed = currentSpeed end
+	if not v then return end
+	currentSpeed = v
 end
+
+-- ОТДЕЛЬНЫЙ ЦИКЛ, КОТОРЫЙ ПОСТОЯННО ПРИМЕНЯЕТ СКОРОСТЬ
+task.spawn(function()
+	while true do
+		task.wait(0.1) -- как ты и хотел
+		if humanoid then
+			humanoid.WalkSpeed = currentSpeed
+		end
+	end
+end)
 
 task.spawn(function()
 	while true do
@@ -217,9 +229,13 @@ end)
 _G.__FARMING = false
 
 
-_G.GetSpeed = function()
-	return currentSpeed
+if typeof(_G.SetSpeed) == "function" then
+	_G.SetSpeed(v)
+	speedLabel.Text = "Speed: "..v
+else
+	warn("_G.SetSpeed not found (load main.lua first)")
 end
+
 
 local TARGET_SWITCH_COOLDOWN = 0.6
 local currentTarget = nil
