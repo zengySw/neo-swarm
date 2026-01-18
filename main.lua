@@ -198,6 +198,10 @@ if humanoid then
 	currentSpeed = DEFAULT_WALKSPEED
 end
 
+function getSpeed()
+	return currentSpeed
+end
+
 
 -- вызывается из GUI
 local function setSpeed(v)
@@ -227,7 +231,6 @@ end)
 
 -- ====== Farm loop (no twitching) ======
 _G.__FARMING = false
-
 
 if typeof(_G.SetSpeed) == "function" then
 	_G.SetSpeed(v)
@@ -316,5 +319,6 @@ end
 _G.StartFarm = startFarm
 _G.StopFarm = stopFarm
 _G.SetSpeed = setSpeed
+_G.getSpeed = getSpeed
 _G.GetState = getState
 _G.ResetAll = resetAll
