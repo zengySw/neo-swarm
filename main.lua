@@ -194,7 +194,7 @@ local currentSpeed = 16
 
 local function setSpeed(v)
 	v = tonumber(v)
-	if not v then return end
+	if not v then return warn("error setting speed") end
 	currentSpeed = v
 	if humanoid then humanoid.WalkSpeed = currentSpeed end
 end
