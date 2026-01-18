@@ -1,9 +1,20 @@
+-- functions.lua (LOGIC ONLY) - smooth movement, random C in zone
+-- Exports:
+--   _G.StartFarm()
+--   _G.StopFarm()
+--   _G.SetSpeed(value)
+--   _G.GetState() -> { farming=bool, speed=number, target=string? }
+--
+-- Requirements:
+--   workspace.Collectibles exists (Folder)
+--   Objects named "C" inside it
+--   Optional filter: must have BackDecal + FrontDecal + Sound (descendants)
+
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
-local UserInputService = game:GetService("UserInputService")
-local tokens = workspace:WaitForChild("Collectibles")
-local player = Players.LocalPlayer
 
+local player = Players.LocalPlayer
+local tokens = workspace:WaitForChild("Collectibles")
 
 -- ====== ZONE SETTINGS ======
 local X1, X2 = -102.6, 39.3
@@ -21,13 +32,11 @@ local function isPointInZone(pos: Vector3)
 end
 
 local function getZoneCenter()
-	return Vector3.new((Zone.min.X + Zone.max.X) / 2, Y, (Zone.min.Z + Zone.max.Z) / 2)
-end
-
-local function getRandomPointInZone()
-	local x = math.random() * (Zone.max.X - Zone.min.X) + Zone.min.X
-	local z = math.random() * (Zone.max.Z - Zone.min.Z) + Zone.min.Z
-	return Vector3.new(x, Y, z)
+	return Vector3.new(
+		(Zone.min.X + Zone.max.X) / 2,
+		Y,
+		(Zone.min.Z + Zone.max.Z) / 2
+	)
 end
 
 -- ====== Character refs (safe on respawn) ======
@@ -45,21 +54,18 @@ player.CharacterAdded:Connect(function()
 	refreshCharacter()
 end)
 
--- ====== Collectibles ======
-local function getCollectiblesFolder()
-	return workspace:FindFirstChild("collectibles")
-end
-
+-- ====== Object helpers ======
 local function getObjPos(obj)
 	if obj:IsA("BasePart") then
-		return obj.Position -- точные координаты
+		return obj.Position
 	elseif obj:IsA("Model") then
-		return obj:GetPivot().Position -- точный центр модели
+		return obj:GetPivot().Position
 	end
+	return nil
 end
 
--- Проверка, что у объекта есть BackDecal, FrontDecal и Sound
 local function hasRequiredStuff(obj)
+	-- BackDecal + FrontDecal + any Sound (descendant)
 	local hasBack, hasFront, hasSound = false, false, false
 
 	for _, d in ipairs(obj:GetDescendants()) do
@@ -74,46 +80,43 @@ local function hasRequiredStuff(obj)
 	return hasBack and hasFront and hasSound
 end
 
-
-
+-- ====== Pick random C in zone (filtered) ======
 local function getRandomCInZone()
 	if not tokens then return nil end
 
 	local list = {}
-
 	for _, obj in ipairs(tokens:GetChildren()) do
-		if obj.Name == "C" then
+		if obj.Name == "C" and hasRequiredStuff(obj) then
 			local pos = getObjPos(obj)
 			if pos and isPointInZone(pos) then
-				table.insert(list, obj)
+				list[#list + 1] = obj
 			end
 		end
 	end
 
-	if #list == 0 then
-		return nil
-	end
-
+	if #list == 0 then return nil end
 	return list[math.random(1, #list)]
 end
 
-
-
--- ====== Movement ======
-local STOP_RADIUS = 3.5          -- насколько близко "подойти"
-local WAYPOINT_TIMEOUT = 2.8     -- таймаут на одну точку пути
-local FAILSAFE_MOVE_TIMEOUT = 4  -- таймаут для прямого MoveTo
+-- ====== Movement (smooth) ======
+local STOP_RADIUS = 3.5
+local WAYPOINT_TIMEOUT = 2.8
+local FAILSAFE_MOVE_TIMEOUT = 4
 
 local function moveDirect(targetPos: Vector3, timeoutSec: number)
+	if not humanoid then return false end
 	humanoid:MoveTo(targetPos)
+
 	local done = false
-	local conn = humanoid.MoveToFinished:Connect(function()
+	local conn
+	conn = humanoid.MoveToFinished:Connect(function()
 		done = true
+		if conn then conn:Disconnect() end
 	end)
 
 	local t = 0
 	while not done and t < timeoutSec and _G.__FARMING do
-		t += task.wait(0.01)
+		t += task.wait(0.05) -- IMPORTANT: no micro-spam
 	end
 
 	if conn then conn:Disconnect() end
@@ -121,7 +124,6 @@ local function moveDirect(targetPos: Vector3, timeoutSec: number)
 end
 
 local function movePath(targetPos: Vector3)
-	-- если уже рядом — не дергаем pathfinding
 	if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
 		return true
 	end
@@ -131,7 +133,7 @@ local function movePath(targetPos: Vector3)
 		AgentHeight = 5,
 		AgentCanJump = true,
 		AgentJumpHeight = 7,
-		WaypointSpacing = 4,
+		WaypointSpacing = 5, -- bigger = smoother
 	})
 
 	path:ComputeAsync(root.Position, targetPos)
@@ -139,33 +141,33 @@ local function movePath(targetPos: Vector3)
 		return moveDirect(targetPos, FAILSAFE_MOVE_TIMEOUT)
 	end
 
-	for _, wp in ipairs(path:GetWaypoints()) do
+	local waypoints = path:GetWaypoints()
+	for _, wp in ipairs(waypoints) do
 		if not _G.__FARMING then return false end
-
-		-- если уже рядом с целью — стоп
-		if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
-			return true
-		end
+		if (root.Position - targetPos).Magnitude <= STOP_RADIUS then return true end
 
 		humanoid:MoveTo(wp.Position)
 		if wp.Action == Enum.PathWaypointAction.Jump then
 			humanoid.Jump = true
 		end
 
-		local done = false
-		local conn = humanoid.MoveToFinished:Connect(function()
-			done = true
+		local reached = false
+		local conn
+		conn = humanoid.MoveToFinished:Connect(function()
+			reached = true
+			if conn then conn:Disconnect() end
 		end)
 
 		local t = 0
-		while not done and t < WAYPOINT_TIMEOUT and _G.__FARMING do
-			t += task.wait(0.01)
+		while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
+			t += task.wait(0.05)
 		end
-
 		if conn then conn:Disconnect() end
 
-		-- если завис — маленький пинок
-		
+		-- stuck -> recompute (but not spam)
+		if not reached then
+			return movePath(targetPos)
+		end
 	end
 
 	return (root.Position - targetPos).Magnitude <= STOP_RADIUS + 1
@@ -175,55 +177,86 @@ local function approachObject(obj)
 	local pos = getObjPos(obj)
 	if not pos then return false end
 
-	-- ТОЧНО в координаты объекта (без подмены Y)
-	if not isPointInZone(pos) then 
-		warn("C moved out of zone before approach:", obj:GetFullName())
-		return false 
+	-- must still be in zone (exact coords)
+	if not isPointInZone(pos) then
+		return false
 	end
 
 	local ok = movePath(pos)
-	if ok then
-		-- финальный дожим (точно в pos)
-		if (root.Position - pos).Magnitude > STOP_RADIUS then
-			moveDirect(pos, 1.2)
-		end
+	if ok and (root.Position - pos).Magnitude > STOP_RADIUS then
+		moveDirect(pos, 1.2)
 	end
-	return true
+	return ok
 end
 
+-- ====== Speed control (loop apply) ======
+local currentSpeed = 16
 
--- ====== Farm loop ======
+local function setSpeed(v)
+	v = tonumber(v)
+	if not v then return end
+	currentSpeed = v
+	if humanoid then humanoid.WalkSpeed = currentSpeed end
+end
+
+task.spawn(function()
+	while true do
+		task.wait(0.1)
+		if humanoid then
+			humanoid.WalkSpeed = currentSpeed
+		end
+	end
+end)
+
+-- ====== Farm loop (no twitching) ======
 _G.__FARMING = false
 
+local TARGET_SWITCH_COOLDOWN = 0.6
+local currentTarget = nil
+local lastSwitch = 0
+
 local function farmLoop()
-	-- старт: чуть в центр (чтобы не упираться в стену/край)
+	-- move to center once
 	movePath(getZoneCenter())
-	task.wait(0.01)
+	task.wait(0.2)
 
 	while _G.__FARMING do
-
-		-- перереспавн/слом ссылок
+		-- respawn safety
 		if not player.Character or not humanoid or not root then
 			refreshCharacter()
 		end
 
-		local cObj, dist = getRandomCInZone()
+		-- keep current target until invalid
+		if currentTarget and currentTarget.Parent == tokens then
+			local pos = getObjPos(currentTarget)
+			if pos and isPointInZone(pos) then
+				approachObject(currentTarget)
+				task.wait(0.1)
+				continue
+			end
+		end
 
-			if cObj then
-				-- cObj уже гарантированно "C" + hasRequiredStuff (ты это проверяешь в getNearestCInZone)
-				approachObject(cObj)
-				task.wait(0.01)
-			else
-			-- если C нет — гуляем
-			-- local p = getRandomPointInZone()
-			-- moveDirect(p, 2.5)
-			print("false detect C obj")
-			task.wait(0.01)
-			
+		-- cooldown to prevent target thrash
+		local now = os.clock()
+		if (now - lastSwitch) < TARGET_SWITCH_COOLDOWN then
+			task.wait(0.1)
+			continue
+		end
+
+		currentTarget = getRandomCInZone()
+		lastSwitch = now
+
+		if currentTarget then
+			approachObject(currentTarget)
+			task.wait(0.1)
+		else
+			-- nothing to do -> idle a bit
+			task.wait(0.25)
 		end
 	end
 end
 
+-- ====== Public API for GUI ======
 local function startFarm()
 	if _G.__FARMING then return end
 	_G.__FARMING = true
@@ -232,7 +265,19 @@ end
 
 local function stopFarm()
 	_G.__FARMING = false
+	currentTarget = nil
 end
 
+local function getState()
+	return {
+		farming = _G.__FARMING == true,
+		speed = currentSpeed,
+		target = currentTarget and currentTarget:GetFullName() or nil,
+	}
+end
+
+-- Export to globals for gui.lua
 _G.StartFarm = startFarm
-_G.StopFarm  = stopFarm
+_G.StopFarm = stopFarm
+_G.SetSpeed = setSpeed
+_G.GetState = getState
