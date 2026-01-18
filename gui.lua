@@ -50,7 +50,7 @@ local function round1(x)
 	return math.floor(x * 10) / 10
 end
 
-local speedText = "Speed: "..v
+local speedText = "Speed: "
 
 if typeof(_G.GetSpeed) == "function" then
 	local value = _G.GetSpeed()
@@ -106,13 +106,6 @@ offBtn.Text = "STOP FARM"
 offBtn.BackgroundColor3 = Color3.fromRGB(180,60,60)
 offBtn.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", offBtn)
-
-if typeof(_G.SetSpeed) == "function" then
-	_G.SetSpeed(v)
-	speedLabel.Text = "Speed: "..v
-else
-	warn("_G.SetSpeed not found (load main.lua first)")
-end
 
 
 onBtn.MouseButton1Click:Connect(function()
