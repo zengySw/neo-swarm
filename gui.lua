@@ -1,3 +1,16 @@
+-- gui.lua (FIXED, self-contained)
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Подключение к твоему фарму:
+-- В основном скрипте задай:
+-- _G.StartFarm = startFarm
+-- _G.StopFarm  = stopFarm
+local StartFarm = _G.StartFarm or function() warn("[GUI] _G.StartFarm not set") end
+local StopFarm  = _G.StopFarm  or function() warn("[GUI] _G.StopFarm not set") end
 
 -- ====== GUI ======
 local gui = Instance.new("ScreenGui")
@@ -5,7 +18,7 @@ gui.Name = "AutoFarm_C_GUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999
-gui.Parent = player:WaitForChild("PlayerGui")
+gui.Parent = playerGui
 
 local frame = Instance.new("Frame")
 frame.Size = UDim2.fromOffset(240, 105)
@@ -66,7 +79,7 @@ btnOff.BackgroundColor3 = Color3.fromRGB(170, 70, 70)
 btnOff.Parent = frame
 Instance.new("UICorner", btnOff).CornerRadius = UDim.new(0, 10)
 
--- Independent close (always top-right screen)
+-- крестик В ОКНЕ
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 28, 0, 28)
 closeBtn.Position = UDim2.new(1, -34, 0, 6)
@@ -75,22 +88,23 @@ closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 18
 closeBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
 closeBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
-closeBtn.Parent = frame -- ВАЖНО: именно в окно
+closeBtn.Parent = frame
 closeBtn.ZIndex = 10
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
 
 local function hardClose()
-	stopFarm()
+	pcall(function() StopFarm() end)
 	gui:Destroy()
 end
 
 btnOn.MouseButton1Click:Connect(function()
-	startFarm()
+	StartFarm()
 	status.Text = "Status: ON"
 	status.TextColor3 = Color3.fromRGB(140, 255, 140)
 end)
 
 btnOff.MouseButton1Click:Connect(function()
-	stopFarm()
+	StopFarm()
 	status.Text = "Status: OFF"
 	status.TextColor3 = Color3.fromRGB(170, 170, 190)
 end)
@@ -103,3 +117,5 @@ UserInputService.InputBegan:Connect(function(io, gp)
 		hardClose()
 	end
 end)
+
+return true
