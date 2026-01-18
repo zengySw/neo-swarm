@@ -1,11 +1,10 @@
--- AutoFarm: walk to "C" in workspace.collectibles (ONE LocalScript)
--- Put into: StarterPlayerScripts (LocalScript)
-
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 local UserInputService = game:GetService("UserInputService")
-
+local tokens = workspace:WaitForChild("Collectibles")
 local player = Players.LocalPlayer
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/zengySw/neo-swarm/main/gui.lua"))()
 
 -- ====== ZONE SETTINGS ======
 local X1, X2 = -102.6, 39.3
@@ -62,17 +61,12 @@ end
 
 -- Проверка, что у объекта есть BackDecal, FrontDecal и Sound
 local function hasRequiredStuff(obj)
-	local hasBack = false
-	local hasFront = false
-	local hasSound = false
+	local hasBack, hasFront, hasSound = false, false, false
 
 	for _, d in ipairs(obj:GetDescendants()) do
 		if d:IsA("Decal") then
-			if d.Name == "BackDecal" then
-				hasBack = true
-			elseif d.Name == "FrontDecal" then
-				hasFront = true
-			end
+			if d.Name == "BackDecal" then hasBack = true end
+			if d.Name == "FrontDecal" then hasFront = true end
 		elseif d:IsA("Sound") then
 			hasSound = true
 		end
@@ -83,25 +77,28 @@ end
 
 
 
-local function getNearestCInZone()
-	local folder = getCollectiblesFolder()
-	if not folder then return nil end
+local function getRandomCInZone()
+	if not tokens then return nil end
 
-	local best, bestDist = nil, math.huge
-	for _, obj in ipairs(folder:GetChildren()) do
+	local list = {}
+
+	for _, obj in ipairs(tokens:GetChildren()) do
 		if obj.Name == "C" then
 			local pos = getObjPos(obj)
 			if pos and isPointInZone(pos) then
-				local d = (root.Position - pos).Magnitude
-				if d < bestDist then
-					bestDist = d
-					best = obj
-				end
+				table.insert(list, obj)
 			end
 		end
 	end
-	return best, bestDist
+
+	if #list == 0 then
+		return nil
+	end
+
+	return list[math.random(1, #list)]
 end
+
+
 
 -- ====== Movement ======
 local STOP_RADIUS = 3.5          -- насколько близко "подойти"
@@ -117,7 +114,7 @@ local function moveDirect(targetPos: Vector3, timeoutSec: number)
 
 	local t = 0
 	while not done and t < timeoutSec and _G.__FARMING do
-		t += task.wait(0.05)
+		t += task.wait(0.01)
 	end
 
 	if conn then conn:Disconnect() end
@@ -163,16 +160,13 @@ local function movePath(targetPos: Vector3)
 
 		local t = 0
 		while not done and t < WAYPOINT_TIMEOUT and _G.__FARMING do
-			t += task.wait(0.05)
+			t += task.wait(0.01)
 		end
 
 		if conn then conn:Disconnect() end
 
 		-- если завис — маленький пинок
-		if not done then
-			humanoid.Jump = true
-			task.wait(0.1)
-		end
+		
 	end
 
 	return (root.Position - targetPos).Magnitude <= STOP_RADIUS + 1
@@ -182,22 +176,22 @@ local function approachObject(obj)
 	local pos = getObjPos(obj)
 	if not pos then return false end
 
-	-- идем к координатам C, фиксируем Y чтоб не улетало по высоте
-	local target = Vector3.new(pos.X, Y, pos.Z)
+	-- ТОЧНО в координаты объекта (без подмены Y)
+	if not isPointInZone(pos) then 
+		warn("C moved out of zone before approach:", obj:GetFullName())
+		return false 
+	end
 
-	-- если по дороге C исчез/вышел из зоны — бросаем
-	if not isPointInZone(target) then return false end
-
-	-- идти, пока не подойдем достаточно близко
-	local ok = movePath(target)
+	local ok = movePath(pos)
 	if ok then
-		-- финальный микро-дожим прямым MoveTo (иногда path стопает на 1-2м)
-		if (root.Position - target).Magnitude > STOP_RADIUS then
-			moveDirect(target, 1.2)
+		-- финальный дожим (точно в pos)
+		if (root.Position - pos).Magnitude > STOP_RADIUS then
+			moveDirect(pos, 1.2)
 		end
 	end
 	return true
 end
+
 
 -- ====== Farm loop ======
 _G.__FARMING = false
@@ -205,7 +199,7 @@ _G.__FARMING = false
 local function farmLoop()
 	-- старт: чуть в центр (чтобы не упираться в стену/край)
 	movePath(getZoneCenter())
-	task.wait(0.2)
+	task.wait(0.01)
 
 	while _G.__FARMING do
 
@@ -214,20 +208,18 @@ local function farmLoop()
 			refreshCharacter()
 		end
 
-		local cObj, dist = getNearestCInZone()
+		local cObj, dist = getRandomCInZone()
 
-		if cObj then
-			-- Подходим к C. Всё. Никаких кликов, просто "подошел" 
-			if obj.Name == "C" and hasRequiredStuff(obj) then
+			if cObj then
+				-- cObj уже гарантированно "C" + hasRequiredStuff (ты это проверяешь в getNearestCInZone)
 				approachObject(cObj)
-				task.wait(0.1)
-			end
-		else
+				task.wait(0.01)
+			else
 			-- если C нет — гуляем
-			local p = getRandomPointInZone()
-			moveDirect(p, 2.5)
+			-- local p = getRandomPointInZone()
+			-- moveDirect(p, 2.5)
 			print("false detect C obj")
-			task.wait(0.2)
+			task.wait(0.01)
 			
 		end
 	end
@@ -242,108 +234,3 @@ end
 local function stopFarm()
 	_G.__FARMING = false
 end
-
--- ====== GUI ======
-local gui = Instance.new("ScreenGui")
-gui.Name = "AutoFarm_C_GUI"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.DisplayOrder = 999
-gui.Parent = player:WaitForChild("PlayerGui")
-
-local frame = Instance.new("Frame")
-frame.Size = UDim2.fromOffset(240, 105)
-frame.Position = UDim2.new(0.05, 0, 0.55, 0)
-frame.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
-frame.BorderSizePixel = 0
-frame.Active = true
-frame.Draggable = true
-frame.Parent = gui
-
-Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
-local stroke = Instance.new("UIStroke", frame)
-stroke.Thickness = 2
-stroke.Transparency = 0.25
-stroke.Color = Color3.fromRGB(90, 90, 120)
-
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(10, 8)
-title.Size = UDim2.new(1, -20, 0, 18)
-title.Text = "AutoFarm: go to C"
-title.Font = Enum.Font.GothamBold
-title.TextSize = 14
-title.TextColor3 = Color3.fromRGB(245, 245, 255)
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = frame
-
-local status = Instance.new("TextLabel")
-status.BackgroundTransparency = 1
-status.Position = UDim2.fromOffset(10, 28)
-status.Size = UDim2.new(1, -20, 0, 16)
-status.Text = "Status: OFF"
-status.Font = Enum.Font.Gotham
-status.TextSize = 13
-status.TextColor3 = Color3.fromRGB(170, 170, 190)
-status.TextXAlignment = Enum.TextXAlignment.Left
-status.Parent = frame
-
-local btnOn = Instance.new("TextButton")
-btnOn.Size = UDim2.new(0.48, 0, 0, 34)
-btnOn.Position = UDim2.fromOffset(10, 55)
-btnOn.Text = "ON"
-btnOn.Font = Enum.Font.GothamBold
-btnOn.TextSize = 16
-btnOn.TextColor3 = Color3.fromRGB(255, 255, 255)
-btnOn.BackgroundColor3 = Color3.fromRGB(60, 170, 80)
-btnOn.Parent = frame
-Instance.new("UICorner", btnOn).CornerRadius = UDim.new(0, 10)
-
-local btnOff = Instance.new("TextButton")
-btnOff.Size = UDim2.new(0.48, 0, 0, 34)
-btnOff.Position = UDim2.fromOffset(124, 55)
-btnOff.Text = "OFF"
-btnOff.Font = Enum.Font.GothamBold
-btnOff.TextSize = 16
-btnOff.TextColor3 = Color3.fromRGB(255, 255, 255)
-btnOff.BackgroundColor3 = Color3.fromRGB(170, 70, 70)
-btnOff.Parent = frame
-Instance.new("UICorner", btnOff).CornerRadius = UDim.new(0, 10)
-
--- Independent close (always top-right screen)
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 28, 0, 28)
-closeBtn.Position = UDim2.new(1, -34, 0, 6)
-closeBtn.Text = "✕"
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 18
-closeBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
-closeBtn.BackgroundColor3 = Color3.fromRGB(60, 40, 40)
-closeBtn.Parent = frame -- ВАЖНО: именно в окно
-closeBtn.ZIndex = 10
-
-local function hardClose()
-	stopFarm()
-	gui:Destroy()
-end
-
-btnOn.MouseButton1Click:Connect(function()
-	startFarm()
-	status.Text = "Status: ON"
-	status.TextColor3 = Color3.fromRGB(140, 255, 140)
-end)
-
-btnOff.MouseButton1Click:Connect(function()
-	stopFarm()
-	status.Text = "Status: OFF"
-	status.TextColor3 = Color3.fromRGB(170, 170, 190)
-end)
-
-closeBtn.MouseButton1Click:Connect(hardClose)
-
-UserInputService.InputBegan:Connect(function(io, gp)
-	if gp then return end
-	if io.KeyCode == Enum.KeyCode.End then
-		hardClose()
-	end
-end)
