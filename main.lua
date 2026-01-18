@@ -194,7 +194,7 @@ local function round1(x)
 	return math.floor(x * 10) / 10
 end
 local DEFAULT_WALKSPEED = 16
-	if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
+if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
 local currentSpeed = round1(DEFAULT_WALKSPEED)
 
 
