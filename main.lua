@@ -302,8 +302,19 @@ local function getState()
 	}
 end
 
+local function resetAll()
+	-- стоп фарм
+	stopFarm()
+	-- вернуть дефолтную скорость
+	currentSpeed = DEFAULT_WALKSPEED
+	if humanoid then
+		humanoid.WalkSpeed = DEFAULT_WALKSPEED
+	end
+end
+
 -- Export to globals for gui.lua
 _G.StartFarm = startFarm
 _G.StopFarm = stopFarm
 _G.SetSpeed = setSpeed
 _G.GetState = getState
+_G.ResetAll = resetAll

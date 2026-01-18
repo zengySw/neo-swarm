@@ -35,8 +35,12 @@ close.TextColor3 = Color3.fromRGB(255,200,200)
 Instance.new("UICorner", close)
 
 close.MouseButton1Click:Connect(function()
+	if typeof(_G.ResetAll) == "function" then
+		_G.ResetAll() -- всё откатили, как будто скрипта не было
+	end
 	gui:Destroy()
 end)
+
 
 -- Speed Slider
 local speedLabel = Instance.new("TextLabel", frame)
