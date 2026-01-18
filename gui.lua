@@ -84,7 +84,7 @@ apply.MouseButton1Click:Connect(function()
 	local v = tonumber(box.Text)
 	if v then
 		_G.SetSpeed(v)
-		speedLabel.Text = "Speed: "..v
+		speedLabel.Text = "Speed: "
 	end
 end)
 
