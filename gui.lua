@@ -75,6 +75,8 @@ apply.MouseButton1Click:Connect(function()
 	end
 end)
 
+
+
 -- Farm Buttons
 local onBtn = Instance.new("TextButton", frame)
 onBtn.Position = UDim2.fromOffset(10, 115)
@@ -91,6 +93,14 @@ offBtn.Text = "STOP FARM"
 offBtn.BackgroundColor3 = Color3.fromRGB(180,60,60)
 offBtn.TextColor3 = Color3.new(1,1,1)
 Instance.new("UICorner", offBtn)
+
+if typeof(_G.SetSpeed) == "function" then
+	_G.SetSpeed(v)
+	speedLabel.Text = "Speed: "..v
+else
+	warn("_G.SetSpeed not found (load main.lua first)")
+end
+
 
 onBtn.MouseButton1Click:Connect(function()
 	_G.StartFarm()

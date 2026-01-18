@@ -190,17 +190,13 @@ local function approachObject(obj)
 end
 
 -- ====== Speed control (loop apply) ======
-local DEFAULT_WALKSPEED = humanoid.WalkSpeed
-local currentSpeed = DEFAULT_WALKSPEED 
+local DEFAULT_WALKSPEED = 16
+	if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
+local currentSpeed = DEFAULT_WALKSPEED
 
-if humanoid then
-	DEFAULT_WALKSPEED = humanoid.WalkSpeed
-	currentSpeed = DEFAULT_WALKSPEED
-end
 
-function getSpeed()
-	return currentSpeed
-end
+_G.GetSpeed = function() return currentSpeed end
+
 
 
 -- вызывается из GUI
@@ -231,13 +227,6 @@ end)
 
 -- ====== Farm loop (no twitching) ======
 _G.__FARMING = false
-
-if typeof(_G.SetSpeed) == "function" then
-	_G.SetSpeed(v)
-	speedLabel.Text = "Speed: "..v
-else
-	warn("_G.SetSpeed not found (load main.lua first)")
-end
 
 
 local TARGET_SWITCH_COOLDOWN = 0.6
