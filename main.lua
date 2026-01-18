@@ -195,7 +195,10 @@ local currentSpeed = 16
 local function setSpeed(v)
 	v = tonumber(v)
 	if not v then return warn("error setting speed") end
-	currentSpeed = v
+	while true do
+		currentSpeed = v
+		task.wait(0.01)
+	end
 	if humanoid then humanoid.WalkSpeed = currentSpeed end
 end
 
