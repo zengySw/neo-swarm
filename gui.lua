@@ -41,12 +41,15 @@ close.MouseButton1Click:Connect(function()
 	gui:Destroy()
 end)
 
+local function round1(x)
+	return math.floor(x * 10) / 10
+end
 
 -- Speed Slider
 local speedLabel = Instance.new("TextLabel", frame)
 speedLabel.Position = UDim2.fromOffset(10, 40)
 speedLabel.Size = UDim2.new(1,-20,0,20)
-local xd = "Speed: "..(typeof(_G.GetSpeed) == "function" and tostring(_G.GetSpeed()) or "error")
+local xd = "Speed: "..(typeof(round1(_G.GetSpeed)) == "function" and tostring(round1(_G.GetSpeed())) or "error")
 speedLabel.Text = xd
 speedLabel.BackgroundTransparency = 1
 speedLabel.TextColor3 = Color3.fromRGB(200,200,200)
