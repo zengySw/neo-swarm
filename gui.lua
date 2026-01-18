@@ -50,7 +50,7 @@ local function round1(x)
 	return math.floor(x * 10) / 10
 end
 
-local speedText = "Speed: "
+local speedText = "Speed: "..v
 
 if typeof(_G.GetSpeed) == "function" then
 	local value = _G.GetSpeed()
