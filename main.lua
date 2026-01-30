@@ -214,7 +214,7 @@ end)
 _G.__FARMING = false
 local currentTarget = nil
 local lastSwitch = 0
-local TARGET_SWITCH_COOLDOWN = 0.6
+local TARGET_SWITCH_COOLDOWN = 0.1
 
 local function farmLoop()
     -- Move player to the center of the field once at start
