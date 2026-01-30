@@ -116,7 +116,7 @@ local CACHE_LIFETIME = 0.5
 
 local function getRandomCInZone()
     if not tokens then return nil end
-    
+
     local now = os.clock()
     if (now - cacheTime) >= CACHE_LIFETIME then
         cachedTokens = {}
@@ -130,7 +130,7 @@ local function getRandomCInZone()
         end
         cacheTime = now
     end
-    
+
     -- Удаляем невалидные из кэша (собранные токены)
     for i = #cachedTokens, 1, -1 do
         if cachedTokens[i].Parent ~= tokens then
@@ -138,8 +138,10 @@ local function getRandomCInZone()
         end
     end
 
-    if #cachedTokens == 0 then return nil end
-    return cachedTokens[math.random(1, #cachedTokens)]
+    -- Проверка ПОСЛЕ очистки невалидных
+    local count = #cachedTokens
+    if count == 0 then return nil end
+    return cachedTokens[math.random(count)]
 end
 
 
