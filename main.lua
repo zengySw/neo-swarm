@@ -47,8 +47,12 @@ local Config = {
 }
 
 local function isPointInZone(pos: Vector3)
-	return pos.X >= Config.dandelion.X1 and pos.X <= Config.dandelion.X2
-		and pos.Z >= Config.dandelion.Z1 and pos.Z <= Config.dandelion.Z2
+	local zone = Config.dandelion
+	local minX = math.min(zone.X1, zone.X2)
+	local maxX = math.max(zone.X1, zone.X2)
+	local minZ = math.min(zone.Z1, zone.Z2)
+	local maxZ = math.max(zone.Z1, zone.Z2)
+	return pos.X >= minX and pos.X <= maxX and pos.Z >= minZ and pos.Z <= maxZ
 end
 
 local function getZoneCenter()
