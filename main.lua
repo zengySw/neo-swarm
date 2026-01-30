@@ -1,399 +1,316 @@
--- functions.lua (LOGIC ONLY) - smooth movement, random C in zone
--- Exports:
---   _G.StartFarm()
---   _G.StopFarm()
---   _G.SetSpeed(value)
---   _G.GetState() -> { farming=bool, speed=number, target=string? }
---
--- Requirements:
---   workspace.Collectibles exists (Folder)
---   Objects named "C" inside it
---   Optional filter: must have BackDecal + FrontDecal + Sound (descendants)
-
+-- main.lua (Farming logic and movement)
 local Players = game:GetService("Players")
 local PathfindingService = game:GetService("PathfindingService")
 
 local player = Players.LocalPlayer
 local tokens = workspace:WaitForChild("Collectibles")
 
--- ====== CONFIGURATION ======
-local Config = {
-    -- Zone
-    dandelion = {
-        X1 = -102.6, X2 = 39.3,
-        Z1 = 255, Z2 = 184.0,
-        Y = 4.0,
-    },
-
-    -- Movement
-    STOP_RADIUS = 2.5,               -- уменьшил для точности
-    WAYPOINT_TIMEOUT = 0.8,          -- быстрее таймаут
-    FAILSAFE_MOVE_TIMEOUT = 1.5,
-    MOVEMENT_TICK = 0.016,           -- ~60fps проверка
-
-    -- Farm loop
-    TARGET_SWITCH_COOLDOWN = 0.05,   -- почти без кулдауна
-    IDLE_WAIT = 0.05,
-    LOOP_TICK = 0.016,
-
-    -- Speed
-    SPEED_APPLY_INTERVAL = 0.1,
-
-    -- Pathfinding
-    AGENT_RADIUS = 2,
-    AGENT_HEIGHT = 5,
-    AGENT_JUMP_HEIGHT = 7,
-    WAYPOINT_SPACING = 6,            -- больше = меньше точек = быстрее
-
-    -- Smart targeting
-    VISITED_RADIUS = 8,              -- радиус "уже был тут"
-    VISITED_EXPIRE = 3,              -- секунд помнить посещённое место
-    MAX_VISITED = 10,                -- максимум запомненных мест
+-- ====== ZONE SETTINGS (Field coordinates) ======
+local Fields = {
+    ["Pine Tree Forest"] = {X1 = -340, X2 = -280, Z1 = -210, Z2 = -130, Y = 65.5},
+    ["Pepper Patch"]    = {X1 = -400, X2 = -300, Z1 = -350, Z2 = -250, Y = 105.0},
+    ["Mountain Top Field"] = {X1 = 55,  X2 = 95,  Z1 = -225, Z2 = -145, Y = 176.0},
 }
+local fieldList = {"Pine Tree Forest", "Pepper Patch", "Mountain Top Field"}
+local currentField = fieldList[1]  -- default field
+
+-- Table to hold current zone boundaries
+local Zone = { min = Vector3.new(0,0,0), max = Vector3.new(0,0,0) }
+-- Apply field coordinates to Zone
+local function applyField(name)
+    local coords = Fields[name]
+    if not coords then return end
+    Zone.min = Vector3.new(math.min(coords.X1, coords.X2), coords.Y, math.min(coords.Z1, coords.Z2))
+    Zone.max = Vector3.new(math.max(coords.X1, coords.X2), coords.Y, math.max(coords.Z1, coords.Z2))
+    currentField = name
+end
+-- Initialize Zone with default field
+applyField(currentField)
 
 local function isPointInZone(pos: Vector3)
-	local zone = Config.dandelion
-	local minX = math.min(zone.X1, zone.X2)
-	local maxX = math.max(zone.X1, zone.X2)
-	local minZ = math.min(zone.Z1, zone.Z2)
-	local maxZ = math.max(zone.Z1, zone.Z2)
-	return pos.X >= minX and pos.X <= maxX and pos.Z >= minZ and pos.Z <= maxZ
+    return pos.X >= Zone.min.X and pos.X <= Zone.max.X
+       and pos.Z >= Zone.min.Z and pos.Z <= Zone.max.Z
 end
 
 local function getZoneCenter()
-	return Vector3.new(
-		(Config.dandelion.X1 + Config.dandelion.X2) / 2,
-		Config.dandelion.Y,
-		(Config.dandelion.Z1 + Config.dandelion.Z2) / 2
-	)
+    return Vector3.new(
+        (Zone.min.X + Zone.max.X) / 2,
+        Zone.min.Y,
+        (Zone.min.Z + Zone.max.Z) / 2
+    )
 end
 
--- ====== Character refs (safe on respawn) ======
+-- ====== Character references (safe on respawn) ======
 local character, humanoid, root
-
 local function refreshCharacter()
-	character = player.Character or player.CharacterAdded:Wait()
-	humanoid = character:WaitForChild("Humanoid")
-	root = character:WaitForChild("HumanoidRootPart")
+    character = player.Character or player.CharacterAdded:Wait()
+    humanoid = character:WaitForChild("Humanoid")
+    root = character:WaitForChild("HumanoidRootPart")
 end
-
 refreshCharacter()
 player.CharacterAdded:Connect(function()
-	task.wait(0.2)
-	refreshCharacter()
+    task.wait(0.2)
+    refreshCharacter()
 end)
 
--- ====== Object helpers ======
+-- ====== Token object helpers ======
 local function getObjPos(obj)
-	if obj:IsA("BasePart") then
-		return obj.Position
-	elseif obj:IsA("Model") then
-		return obj:GetPivot().Position
-	end
-	return nil
+    if obj:IsA("BasePart") then
+        return obj.Position
+    elseif obj:IsA("Model") then
+        return obj:GetPivot().Position
+    end
+    return nil
 end
 
 local function hasRequiredStuff(obj)
+    -- Check that the token has BackDecal, FrontDecal, and a Sound
     local hasBack, hasFront, hasSound = false, false, false
-
     for _, d in ipairs(obj:GetDescendants()) do
         if d:IsA("Decal") then
-            local name = d.Name
-            if name == "BackDecal" then 
-                hasBack = true 
-            elseif name == "FrontDecal" then 
-                hasFront = true 
-            end
+            if d.Name == "BackDecal" then hasBack = true end
+            if d.Name == "FrontDecal" then hasFront = true end
         elseif d:IsA("Sound") then
             hasSound = true
         end
-        
-        -- Ранний выход как только всё найдено
         if hasBack and hasFront and hasSound then
-            return true
+            break  -- all found
         end
     end
-
-    return false
+    return hasBack and hasFront and hasSound
 end
 
-
--- ====== Smart target selection ======
-local visitedPositions = {} -- {pos: Vector3, time: number}
-
-local function isRecentlyVisited(pos)
-    local now = os.clock()
-    -- Очистка старых записей
-    for i = #visitedPositions, 1, -1 do
-        if (now - visitedPositions[i].time) > Config.VISITED_EXPIRE then
-            table.remove(visitedPositions, i)
-        end
-    end
-    -- Проверка близости к посещённым
-    for _, v in ipairs(visitedPositions) do
-        if (v.pos - pos).Magnitude < Config.VISITED_RADIUS then
-            return true
-        end
-    end
-    return false
-end
-
-local function markVisited(pos)
-    -- Ограничиваем размер
-    if #visitedPositions >= Config.MAX_VISITED then
-        table.remove(visitedPositions, 1)
-    end
-    visitedPositions[#visitedPositions + 1] = {pos = pos, time = os.clock()}
-end
-
-local function getNearestToken()
-    if not tokens or not root then return nil end
-
-    local best = nil
-    local bestDist = math.huge
-    local rootPos = root.Position
-
+-- ====== Pick a random valid token ("C") within the zone ======
+local function getRandomCInZone()
+    if not tokens then return nil end
+    local list = {}
     for _, obj in ipairs(tokens:GetChildren()) do
-        if obj.Name == "C" and obj.Parent == tokens and hasRequiredStuff(obj) then
+        if obj.Name == "C" and hasRequiredStuff(obj) then
             local pos = getObjPos(obj)
             if pos and isPointInZone(pos) then
-                local dist = (pos - rootPos).Magnitude
-                -- Пропускаем недавно посещённые места
-                if not isRecentlyVisited(pos) and dist < bestDist then
-                    best = obj
-                    bestDist = dist
-                end
+                list[#list + 1] = obj
             end
         end
     end
-
-    -- Если все места посещены — сбросить и взять любой ближайший
-    if not best then
-        visitedPositions = {}
-        for _, obj in ipairs(tokens:GetChildren()) do
-            if obj.Name == "C" and obj.Parent == tokens and hasRequiredStuff(obj) then
-                local pos = getObjPos(obj)
-                if pos and isPointInZone(pos) then
-                    local dist = (pos - rootPos).Magnitude
-                    if dist < bestDist then
-                        best = obj
-                        bestDist = dist
-                    end
-                end
-            end
-        end
+    if #list == 0 then
+        return nil
     end
-
-    return best
+    return list[math.random(1, #list)]
 end
 
-
--- ====== Movement (smooth) ======
+-- ====== Smooth movement using PathfindingService ======
+local STOP_RADIUS = 3.5          -- distance at which we consider the token "reached"
+local WAYPOINT_TIMEOUT = 2.8     -- max wait per waypoint
+local FAILSAFE_MOVE_TIMEOUT = 4  -- fallback timeout for direct move
 
 local function moveDirect(targetPos: Vector3, timeoutSec: number)
     if not humanoid then return false end
     humanoid:MoveTo(targetPos)
-
     local done = false
     local conn
-    conn = humanoid.MoveToFinished:Once(function()
+    conn = humanoid.MoveToFinished:Connect(function(reached)
         done = true
+        if conn then conn:Disconnect() end
     end)
-
     local t = 0
     while not done and t < timeoutSec and _G.__FARMING do
-        t += task.wait(Config.MOVEMENT_TICK)
+        t += task.wait(0.05)
     end
-
-    conn:Disconnect()
+    if conn then conn:Disconnect() end
     return done
 end
 
-
 local function movePath(targetPos: Vector3)
-    local MAX_RETRIES = 3
-    
-    for attempt = 1, MAX_RETRIES do
-        if (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS then
+    if not root or not humanoid then return false end
+    if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
+        return true  -- already close enough
+    end
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 2,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentJumpHeight = 7,
+        WaypointSpacing = 5,  -- bigger spacing for smoother turns
+    })
+    path:ComputeAsync(root.Position, targetPos)
+    if path.Status ~= Enum.PathStatus.Success then
+        -- If pathfinding fails, fall back to a direct move attempt
+        return moveDirect(targetPos, FAILSAFE_MOVE_TIMEOUT)
+    end
+    local waypoints = path:GetWaypoints()
+    for _, wp in ipairs(waypoints) do
+        if not _G.__FARMING then return false end
+        if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
             return true
         end
-        
-        local path = PathfindingService:CreatePath({
-            AgentRadius = Config.AGENT_RADIUS,
-            AgentHeight = Config.AGENT_HEIGHT,
-            AgentCanJump = true,
-            AgentJumpHeight = Config.AGENT_JUMP_HEIGHT,
-            WaypointSpacing = Config.WAYPOINT_SPACING,
-        })
-
-        path:ComputeAsync(root.Position, targetPos)
-        if path.Status ~= Enum.PathStatus.Success then
-            return moveDirect(targetPos, Config.FAILSAFE_MOVE_TIMEOUT)
+        humanoid:MoveTo(wp.Position)
+        if wp.Action == Enum.PathWaypointAction.Jump then
+            humanoid.Jump = true
         end
-
-        local waypoints = path:GetWaypoints()
-        local completed = true
-        
-        for _, wp in ipairs(waypoints) do
-            if not _G.__FARMING then return false end
-            if (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS then return true end
-
-            humanoid:MoveTo(wp.Position)
-            if wp.Action == Enum.PathWaypointAction.Jump then
-                humanoid.Jump = true
-            end
-
-            local reached = false
-            local conn = humanoid.MoveToFinished:Once(function()
-                reached = true
-            end)
-
-            local t = 0
-            while not reached and t < Config.WAYPOINT_TIMEOUT and _G.__FARMING do
-                t += task.wait(Config.MOVEMENT_TICK)
-            end
-            conn:Disconnect()
-
-            if not reached then
-                completed = false
-                break
-            end
+        local reached = false
+        local conn
+        conn = humanoid.MoveToFinished:Connect(function()
+            reached = true
+            if conn then conn:Disconnect() end
+        end)
+        local t = 0
+        while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
+            t += task.wait(0.05)
         end
-        
-        if completed then
-            return (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS + 1
+        if conn then conn:Disconnect() end
+        -- If stuck on this waypoint, try recomputing path (recursively)
+        if not reached then
+            return movePath(targetPos)
         end
     end
-    
-    return false
+    return ((root.Position - targetPos).Magnitude <= STOP_RADIUS + 1)
 end
-
 
 local function approachObject(obj)
     local pos = getObjPos(obj)
     if not pos then return false end
-    if not isPointInZone(pos) then return false end
-
-    -- Просто идём напрямую — быстрее чем pathfinding для близких целей
-    local dist = (root.Position - pos).Magnitude
-    local ok
-    if dist < 15 then
-        ok = moveDirect(pos, Config.FAILSAFE_MOVE_TIMEOUT)
-    else
-        ok = movePath(pos)
+    -- Ensure the token is still within the zone
+    if not isPointInZone(pos) then
+        return false
     end
-
-    -- Отмечаем место как посещённое
-    if ok then
-        markVisited(pos)
+    local ok = movePath(pos)
+    -- If path got us close but not within stop radius, finish with a short direct move
+    if ok and (root.Position - pos).Magnitude > STOP_RADIUS then
+        moveDirect(pos, 1.2)
     end
-
     return ok
 end
 
--- ====== Speed control (loop apply) ======
-local function round1(x)
-	return math.floor(x * 10) / 10
+-- ====== Speed control loop ======
+local function round1(x)  -- helper to round to 1 decimal place
+    return math.floor(x * 10) / 10
 end
-local DEFAULT_WALKSPEED = 30
-if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
+local DEFAULT_WALKSPEED = 16
+if humanoid then
+    DEFAULT_WALKSPEED = humanoid.WalkSpeed
+end
 local currentSpeed = round1(DEFAULT_WALKSPEED)
 
+_G.__SPEED_LOOP = true  -- flag to control the speed loop
 _G.GetSpeed = function() return currentSpeed end
 
 local function setSpeed(v)
-	v = tonumber(v)
-	if not v then return end
-	currentSpeed = v
+    v = tonumber(v)
+    if not v then return end
+    currentSpeed = v
 end
 
+-- Spawn a loop to continuously apply the current speed to Humanoid
 task.spawn(function()
-	while true do
-		task.wait(Config.SPEED_APPLY_INTERVAL)
-		if humanoid then
-			humanoid.WalkSpeed = currentSpeed
-		end
-	end
+    while _G.__SPEED_LOOP do
+        task.wait(0.1)
+        if humanoid then
+            humanoid.WalkSpeed = currentSpeed
+        end
+    end
 end)
 
--- ====== Farm loop ======
+-- ====== Farming loop control ======
 _G.__FARMING = false
 local currentTarget = nil
+local lastSwitch = 0
+local TARGET_SWITCH_COOLDOWN = 0.6
 
 local function farmLoop()
-    -- Быстрый старт — идём к центру только если далеко
-    local center = getZoneCenter()
-    if (root.Position - center).Magnitude > 50 then
-        moveDirect(center, 3)
-    end
-
+    -- Move player to the center of the field once at start
+    movePath(getZoneCenter())
+    task.wait(0.2)
     while _G.__FARMING do
-        -- respawn safety
+        -- If character or humanoid was lost (e.g. died), refresh references
         if not player.Character or not humanoid or not root then
             refreshCharacter()
-            task.wait(0.1)
-            continue
         end
-
-        -- Цель ещё валидна? Продолжаем к ней
+        -- Continue approaching current target if it's still valid
         if currentTarget and currentTarget.Parent == tokens then
             local pos = getObjPos(currentTarget)
             if pos and isPointInZone(pos) then
-                -- Уже близко — сразу ищем следующую
-                if (root.Position - pos).Magnitude <= Config.STOP_RADIUS then
-                    markVisited(pos)
-                    currentTarget = nil
-                else
-                    approachObject(currentTarget)
-                    continue
-                end
-            else
-                currentTarget = nil
+                approachObject(currentTarget)
+                task.wait(0.1)
+                continue  -- keep farming current target
             end
         end
-
-        -- Ищем ближайший токен (умный выбор)
-        currentTarget = getNearestToken()
-
+        -- If we reach here, need to find a new target token
+        local now = os.clock()
+        if (now - lastSwitch) < TARGET_SWITCH_COOLDOWN then
+            -- Small cooldown to avoid rapidly switching targets
+            task.wait(0.1)
+            continue
+        end
+        currentTarget = getRandomCInZone()
+        lastSwitch = now
         if currentTarget then
             approachObject(currentTarget)
+            task.wait(0.1)
         else
-            task.wait(Config.IDLE_WAIT)
+            -- No token available in zone, wait a bit before retrying
+            task.wait(0.25)
         end
     end
 end
 
 -- ====== Public API for GUI ======
 local function startFarm()
-	if _G.__FARMING then return end
-	_G.__FARMING = true
-	task.spawn(farmLoop)
+    if _G.__FARMING then return end
+    _G.__FARMING = true
+    task.spawn(farmLoop)
 end
 
 local function stopFarm()
-	_G.__FARMING = false
-	currentTarget = nil
+    _G.__FARMING = false
+    currentTarget = nil
 end
 
 local function getState()
-	return {
-		farming = _G.__FARMING == true,
-		speed = currentSpeed,
-		target = currentTarget and currentTarget:GetFullName() or nil,
-	}
+    return {
+        farming = (_G.__FARMING == true),
+        speed   = currentSpeed,
+        target  = currentTarget and currentTarget:GetFullName() or nil,
+        field   = currentField,
+    }
+end
+
+local function setField(name)
+    if not Fields[name] then return end
+    local wasFarming = _G.__FARMING
+    if wasFarming then
+        stopFarm()
+    end
+    applyField(name)
+    if wasFarming then
+        startFarm()
+    else
+        -- If farm was off, just move the character to the new field center
+        task.spawn(function()
+            movePath(getZoneCenter())
+        end)
+    end
 end
 
 local function resetAll()
-	stopFarm()
-	currentSpeed = DEFAULT_WALKSPEED
-	if humanoid then
-		humanoid.WalkSpeed = DEFAULT_WALKSPEED
-	end
+    -- Stop farming and reset speed/field
+    stopFarm()
+    currentSpeed = DEFAULT_WALKSPEED
+    if humanoid then
+        humanoid.WalkSpeed = DEFAULT_WALKSPEED
+    end
+    _G.__SPEED_LOOP = false  -- end the speed apply loop
+    -- (GUI will be destroyed by itself on close)
 end
 
--- Export to globals for gui.lua
+-- Expose functions for GUI
 _G.StartFarm = startFarm
-_G.StopFarm = stopFarm
-_G.SetSpeed = setSpeed
-_G.GetState = getState
-_G.ResetAll = resetAll
+_G.StopFarm  = stopFarm
+_G.SetField  = setField
+_G.SetSpeed  = setSpeed
+_G.GetState  = getState
+_G.ResetAll  = resetAll
+
+-- Also expose field list for the GUI dropdown
+_G.GetFields = function()
+    return fieldList
+end
