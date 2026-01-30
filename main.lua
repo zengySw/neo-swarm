@@ -46,22 +46,16 @@ local Config = {
     WAYPOINT_SPACING = 5,
 }
 
-
-local Zone = {
-	min = Vector3.new(math.min(X1, X2), Y, math.min(Z1, Z2)),
-	max = Vector3.new(math.max(X1, X2), Y, math.max(Z1, Z2)),
-}
-
 local function isPointInZone(pos: Vector3)
-	return pos.X >= Zone.min.X and pos.X <= Zone.max.X
-		and pos.Z >= Zone.min.Z and pos.Z <= Zone.max.Z
+	return pos.X >= Config.dandelion.X1 and pos.X <= Config.dandelion.X2
+		and pos.Z >= Config.dandelion.Z1 and pos.Z <= Config.dandelion.Z2
 end
 
 local function getZoneCenter()
 	return Vector3.new(
-		(Zone.min.X + Zone.max.X) / 2,
-		Y,
-		(Zone.min.Z + Zone.max.Z) / 2
+		(Config.dandelion.X1 + Config.dandelion.X2) / 2,
+		Config.dandelion.Y,
+		(Config.dandelion.Z1 + Config.dandelion.Z2) / 2
 	)
 end
 
