@@ -24,26 +24,31 @@ local Config = {
         Z1 = 255, Z2 = 184.0,
         Y = 4.0,
     },
-    
+
     -- Movement
-    STOP_RADIUS = 3.5,
-    WAYPOINT_TIMEOUT = 2.8,
-    FAILSAFE_MOVE_TIMEOUT = 4,
-    MOVEMENT_TICK = 0.05,
-    
+    STOP_RADIUS = 2.5,               -- уменьшил для точности
+    WAYPOINT_TIMEOUT = 0.8,          -- быстрее таймаут
+    FAILSAFE_MOVE_TIMEOUT = 1.5,
+    MOVEMENT_TICK = 0.016,           -- ~60fps проверка
+
     -- Farm loop
-    TARGET_SWITCH_COOLDOWN = 0.6,
-    IDLE_WAIT = 0.25,
-    LOOP_TICK = 0.1,
-    
+    TARGET_SWITCH_COOLDOWN = 0.05,   -- почти без кулдауна
+    IDLE_WAIT = 0.05,
+    LOOP_TICK = 0.016,
+
     -- Speed
     SPEED_APPLY_INTERVAL = 0.1,
-    
+
     -- Pathfinding
     AGENT_RADIUS = 2,
     AGENT_HEIGHT = 5,
     AGENT_JUMP_HEIGHT = 7,
-    WAYPOINT_SPACING = 5,
+    WAYPOINT_SPACING = 6,            -- больше = меньше точек = быстрее
+
+    -- Smart targeting
+    VISITED_RADIUS = 8,              -- радиус "уже был тут"
+    VISITED_EXPIRE = 3,              -- секунд помнить посещённое место
+    MAX_VISITED = 10,                -- максимум запомненных мест
 }
 
 local function isPointInZone(pos: Vector3)
@@ -113,39 +118,73 @@ local function hasRequiredStuff(obj)
 end
 
 
--- ====== Pick random C in zone (filtered) ======
-local cachedTokens = {}
-local cacheTime = 0
-local CACHE_LIFETIME = 0.5
+-- ====== Smart target selection ======
+local visitedPositions = {} -- {pos: Vector3, time: number}
 
-local function getRandomCInZone()
-    if not tokens then return nil end
-
+local function isRecentlyVisited(pos)
     local now = os.clock()
-    if (now - cacheTime) >= CACHE_LIFETIME then
-        cachedTokens = {}
-        for _, obj in ipairs(tokens:GetChildren()) do
-            if obj.Name == "C" and hasRequiredStuff(obj) then
-                local pos = getObjPos(obj)
-                if pos and isPointInZone(pos) then
-                    cachedTokens[#cachedTokens + 1] = obj
+    -- Очистка старых записей
+    for i = #visitedPositions, 1, -1 do
+        if (now - visitedPositions[i].time) > Config.VISITED_EXPIRE then
+            table.remove(visitedPositions, i)
+        end
+    end
+    -- Проверка близости к посещённым
+    for _, v in ipairs(visitedPositions) do
+        if (v.pos - pos).Magnitude < Config.VISITED_RADIUS then
+            return true
+        end
+    end
+    return false
+end
+
+local function markVisited(pos)
+    -- Ограничиваем размер
+    if #visitedPositions >= Config.MAX_VISITED then
+        table.remove(visitedPositions, 1)
+    end
+    visitedPositions[#visitedPositions + 1] = {pos = pos, time = os.clock()}
+end
+
+local function getNearestToken()
+    if not tokens or not root then return nil end
+
+    local best = nil
+    local bestDist = math.huge
+    local rootPos = root.Position
+
+    for _, obj in ipairs(tokens:GetChildren()) do
+        if obj.Name == "C" and obj.Parent == tokens and hasRequiredStuff(obj) then
+            local pos = getObjPos(obj)
+            if pos and isPointInZone(pos) then
+                local dist = (pos - rootPos).Magnitude
+                -- Пропускаем недавно посещённые места
+                if not isRecentlyVisited(pos) and dist < bestDist then
+                    best = obj
+                    bestDist = dist
                 end
             end
         end
-        cacheTime = now
     end
 
-    -- Удаляем невалидные из кэша (собранные токены)
-    for i = #cachedTokens, 1, -1 do
-        if cachedTokens[i].Parent ~= tokens then
-            table.remove(cachedTokens, i)
+    -- Если все места посещены — сбросить и взять любой ближайший
+    if not best then
+        visitedPositions = {}
+        for _, obj in ipairs(tokens:GetChildren()) do
+            if obj.Name == "C" and obj.Parent == tokens and hasRequiredStuff(obj) then
+                local pos = getObjPos(obj)
+                if pos and isPointInZone(pos) then
+                    local dist = (pos - rootPos).Magnitude
+                    if dist < bestDist then
+                        best = obj
+                        bestDist = dist
+                    end
+                end
+            end
         end
     end
 
-    -- Проверка ПОСЛЕ очистки невалидных
-    local count = #cachedTokens
-    if count == 0 then return nil end
-    return cachedTokens[math.random(count)]
+    return best
 end
 
 
@@ -231,18 +270,25 @@ end
 
 
 local function approachObject(obj)
-	local pos = getObjPos(obj)
-	if not pos then return false end
+    local pos = getObjPos(obj)
+    if not pos then return false end
+    if not isPointInZone(pos) then return false end
 
-	if not isPointInZone(pos) then
-		return false
-	end
+    -- Просто идём напрямую — быстрее чем pathfinding для близких целей
+    local dist = (root.Position - pos).Magnitude
+    local ok
+    if dist < 15 then
+        ok = moveDirect(pos, Config.FAILSAFE_MOVE_TIMEOUT)
+    else
+        ok = movePath(pos)
+    end
 
-	local ok = movePath(pos)
-	if ok and (root.Position - pos).Magnitude > Config.STOP_RADIUS then
-		moveDirect(pos, 1.2)
-	end
-	return ok
+    -- Отмечаем место как посещённое
+    if ok then
+        markVisited(pos)
+    end
+
+    return ok
 end
 
 -- ====== Speed control (loop apply) ======
@@ -270,46 +316,51 @@ task.spawn(function()
 	end
 end)
 
--- ====== Farm loop (no twitching) ======
+-- ====== Farm loop ======
 _G.__FARMING = false
-
 local currentTarget = nil
-local lastSwitch = 0
 
 local function farmLoop()
-	movePath(getZoneCenter())
-	task.wait(0.2)
+    -- Быстрый старт — идём к центру только если далеко
+    local center = getZoneCenter()
+    if (root.Position - center).Magnitude > 50 then
+        moveDirect(center, 3)
+    end
 
-	while _G.__FARMING do
-		if not player.Character or not humanoid or not root then
-			refreshCharacter()
-		end
+    while _G.__FARMING do
+        -- respawn safety
+        if not player.Character or not humanoid or not root then
+            refreshCharacter()
+            task.wait(0.1)
+            continue
+        end
 
-		if currentTarget and currentTarget.Parent == tokens then
-			local pos = getObjPos(currentTarget)
-			if pos and isPointInZone(pos) then
-				approachObject(currentTarget)
-				task.wait(Config.LOOP_TICK)
-				continue
-			end
-		end
+        -- Цель ещё валидна? Продолжаем к ней
+        if currentTarget and currentTarget.Parent == tokens then
+            local pos = getObjPos(currentTarget)
+            if pos and isPointInZone(pos) then
+                -- Уже близко — сразу ищем следующую
+                if (root.Position - pos).Magnitude <= Config.STOP_RADIUS then
+                    markVisited(pos)
+                    currentTarget = nil
+                else
+                    approachObject(currentTarget)
+                    continue
+                end
+            else
+                currentTarget = nil
+            end
+        end
 
-		local now = os.clock()
-		if (now - lastSwitch) < Config.TARGET_SWITCH_COOLDOWN then
-			task.wait(Config.LOOP_TICK)
-			continue
-		end
+        -- Ищем ближайший токен (умный выбор)
+        currentTarget = getNearestToken()
 
-		currentTarget = getRandomCInZone()
-		lastSwitch = now
-
-		if currentTarget then
-			approachObject(currentTarget)
-			task.wait(Config.LOOP_TICK)
-		else
-			task.wait(Config.IDLE_WAIT)
-		end
-	end
+        if currentTarget then
+            approachObject(currentTarget)
+        else
+            task.wait(Config.IDLE_WAIT)
+        end
+    end
 end
 
 -- ====== Public API for GUI ======
