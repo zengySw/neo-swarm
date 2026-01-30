@@ -84,35 +84,35 @@ local function getObjPos(obj)
 	return nil
 end
 
--- local function hasRequiredStuff(obj)
---     local hasBack, hasFront, hasSound = false, false, false
+local function hasRequiredStuff(obj)
+    local hasBack, hasFront, hasSound = false, false, false
 
---     for _, d in ipairs(obj:GetDescendants()) do
---         if d:IsA("Decal") then
---             local name = d.Name
---             if name == "BackDecal" then 
---                 hasBack = true 
---             elseif name == "FrontDecal" then 
---                 hasFront = true 
---             end
---         elseif d:IsA("Sound") then
---             hasSound = true
---         end
+    for _, d in ipairs(obj:GetDescendants()) do
+        if d:IsA("Decal") then
+            local name = d.Name
+            if name == "BackDecal" then 
+                hasBack = true 
+            elseif name == "FrontDecal" then 
+                hasFront = true 
+            end
+        elseif d:IsA("Sound") then
+            hasSound = true
+        end
         
---         -- Ранний выход как только всё найдено
---         if hasBack and hasFront and hasSound then
---             return true
---         end
---     end
+        -- Ранний выход как только всё найдено
+        if hasBack and hasFront and hasSound then
+            return true
+        end
+    end
 
---     return false
--- end
+    return false
+end
 
 
 -- ====== Pick random C in zone (filtered) ======
 local cachedTokens = {}
 local cacheTime = 0
-local CACHE_LIFETIME = 0.5  -- Обновлять кэш каждые 0.5 сек
+local CACHE_LIFETIME = 0.5
 
 local function getRandomCInZone()
     if not tokens then return nil end
@@ -151,16 +151,16 @@ local function moveDirect(targetPos: Vector3, timeoutSec: number)
 
     local done = false
     local conn
-    conn = humanoid.MoveToFinished:Once(function()  -- Once вместо Connect
+    conn = humanoid.MoveToFinished:Once(function()
         done = true
     end)
 
     local t = 0
     while not done and t < timeoutSec and _G.__FARMING do
-        t += task.wait(0.05)
+        t += task.wait(Config.MOVEMENT_TICK)
     end
 
-    conn:Disconnect()  -- Безопасно даже после Once
+    conn:Disconnect()
     return done
 end
 
@@ -169,14 +169,21 @@ local function movePath(targetPos: Vector3)
     local MAX_RETRIES = 3
     
     for attempt = 1, MAX_RETRIES do
-        if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
+        if (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS then
             return true
         end
         
+        local path = PathfindingService:CreatePath({
+            AgentRadius = Config.AGENT_RADIUS,
+            AgentHeight = Config.AGENT_HEIGHT,
+            AgentCanJump = true,
+            AgentJumpHeight = Config.AGENT_JUMP_HEIGHT,
+            WaypointSpacing = Config.WAYPOINT_SPACING,
+        })
 
         path:ComputeAsync(root.Position, targetPos)
         if path.Status ~= Enum.PathStatus.Success then
-            return moveDirect(targetPos, FAILSAFE_MOVE_TIMEOUT)
+            return moveDirect(targetPos, Config.FAILSAFE_MOVE_TIMEOUT)
         end
 
         local waypoints = path:GetWaypoints()
@@ -184,7 +191,7 @@ local function movePath(targetPos: Vector3)
         
         for _, wp in ipairs(waypoints) do
             if not _G.__FARMING then return false end
-            if (root.Position - targetPos).Magnitude <= STOP_RADIUS then return true end
+            if (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS then return true end
 
             humanoid:MoveTo(wp.Position)
             if wp.Action == Enum.PathWaypointAction.Jump then
@@ -197,19 +204,19 @@ local function movePath(targetPos: Vector3)
             end)
 
             local t = 0
-            while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
-                t += task.wait(0.05)
+            while not reached and t < Config.WAYPOINT_TIMEOUT and _G.__FARMING do
+                t += task.wait(Config.MOVEMENT_TICK)
             end
             conn:Disconnect()
 
             if not reached then
                 completed = false
-                break  -- Выходим из внутреннего цикла, retry весь path
+                break
             end
         end
         
         if completed then
-            return (root.Position - targetPos).Magnitude <= STOP_RADIUS + 1
+            return (root.Position - targetPos).Magnitude <= Config.STOP_RADIUS + 1
         end
     end
     
@@ -221,13 +228,12 @@ local function approachObject(obj)
 	local pos = getObjPos(obj)
 	if not pos then return false end
 
-	-- must still be in zone (exact coords)
 	if not isPointInZone(pos) then
 		return false
 	end
 
 	local ok = movePath(pos)
-	if ok and (root.Position - pos).Magnitude > STOP_RADIUS then
+	if ok and (root.Position - pos).Magnitude > Config.STOP_RADIUS then
 		moveDirect(pos, 1.2)
 	end
 	return ok
@@ -241,24 +247,17 @@ local DEFAULT_WALKSPEED = 30
 if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
 local currentSpeed = round1(DEFAULT_WALKSPEED)
 
-
-
-
 _G.GetSpeed = function() return currentSpeed end
 
-
-
--- вызывается из GUI
 local function setSpeed(v)
 	v = tonumber(v)
 	if not v then return end
 	currentSpeed = v
 end
 
--- ОТДЕЛЬНЫЙ ЦИКЛ, КОТОРЫЙ ПОСТОЯННО ПРИМЕНЯЕТ СКОРОСТЬ
 task.spawn(function()
 	while true do
-		task.wait(0.1) -- как ты и хотел
+		task.wait(Config.SPEED_APPLY_INTERVAL)
 		if humanoid then
 			humanoid.WalkSpeed = currentSpeed
 		end
@@ -268,36 +267,30 @@ end)
 -- ====== Farm loop (no twitching) ======
 _G.__FARMING = false
 
-
-local TARGET_SWITCH_COOLDOWN = 0.6
 local currentTarget = nil
 local lastSwitch = 0
 
 local function farmLoop()
-	-- move to center once
 	movePath(getZoneCenter())
 	task.wait(0.2)
 
 	while _G.__FARMING do
-		-- respawn safety
 		if not player.Character or not humanoid or not root then
 			refreshCharacter()
 		end
 
-		-- keep current target until invalid
 		if currentTarget and currentTarget.Parent == tokens then
 			local pos = getObjPos(currentTarget)
 			if pos and isPointInZone(pos) then
 				approachObject(currentTarget)
-				task.wait(0.1)
+				task.wait(Config.LOOP_TICK)
 				continue
 			end
 		end
 
-		-- cooldown to prevent target thrash
 		local now = os.clock()
-		if (now - lastSwitch) < TARGET_SWITCH_COOLDOWN then
-			task.wait(0.1)
+		if (now - lastSwitch) < Config.TARGET_SWITCH_COOLDOWN then
+			task.wait(Config.LOOP_TICK)
 			continue
 		end
 
@@ -306,10 +299,9 @@ local function farmLoop()
 
 		if currentTarget then
 			approachObject(currentTarget)
-			task.wait(0.1)
+			task.wait(Config.LOOP_TICK)
 		else
-			-- nothing to do -> idle a bit
-			task.wait(0.25)
+			task.wait(Config.IDLE_WAIT)
 		end
 	end
 end
@@ -335,9 +327,7 @@ local function getState()
 end
 
 local function resetAll()
-	-- стоп фарм
 	stopFarm()
-	-- вернуть дефолтную скорость
 	currentSpeed = DEFAULT_WALKSPEED
 	if humanoid then
 		humanoid.WalkSpeed = DEFAULT_WALKSPEED
