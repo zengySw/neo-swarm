@@ -16,10 +16,36 @@ local PathfindingService = game:GetService("PathfindingService")
 local player = Players.LocalPlayer
 local tokens = workspace:WaitForChild("Collectibles")
 
--- ====== ZONE SETTINGS ======
-local X1, X2 = -102.6, 39.3
-local Z1, Z2 = 255, 184.0
-local Y = 4.0
+-- ====== CONFIGURATION ======
+local Config = {
+    -- Zone
+    dandelion = {
+        X1 = -102.6, X2 = 39.3,
+        Z1 = 255, Z2 = 184.0,
+        Y = 4.0,
+    },
+    
+    -- Movement
+    STOP_RADIUS = 3.5,
+    WAYPOINT_TIMEOUT = 2.8,
+    FAILSAFE_MOVE_TIMEOUT = 4,
+    MOVEMENT_TICK = 0.05,
+    
+    -- Farm loop
+    TARGET_SWITCH_COOLDOWN = 0.6,
+    IDLE_WAIT = 0.25,
+    LOOP_TICK = 0.1,
+    
+    -- Speed
+    SPEED_APPLY_INTERVAL = 0.1,
+    
+    -- Pathfinding
+    AGENT_RADIUS = 2,
+    AGENT_HEIGHT = 5,
+    AGENT_JUMP_HEIGHT = 7,
+    WAYPOINT_SPACING = 5,
+}
+
 
 local Zone = {
 	min = Vector3.new(math.min(X1, X2), Y, math.min(Z1, Z2)),
@@ -64,114 +90,138 @@ local function getObjPos(obj)
 	return nil
 end
 
-local function hasRequiredStuff(obj)
-	-- BackDecal + FrontDecal + any Sound (descendant)
-	local hasBack, hasFront, hasSound = false, false, false
+-- local function hasRequiredStuff(obj)
+--     local hasBack, hasFront, hasSound = false, false, false
 
-	for _, d in ipairs(obj:GetDescendants()) do
-		if d:IsA("Decal") then
-			if d.Name == "BackDecal" then hasBack = true end
-			if d.Name == "FrontDecal" then hasFront = true end
-		elseif d:IsA("Sound") then
-			hasSound = true
-		end
-	end
+--     for _, d in ipairs(obj:GetDescendants()) do
+--         if d:IsA("Decal") then
+--             local name = d.Name
+--             if name == "BackDecal" then 
+--                 hasBack = true 
+--             elseif name == "FrontDecal" then 
+--                 hasFront = true 
+--             end
+--         elseif d:IsA("Sound") then
+--             hasSound = true
+--         end
+        
+--         -- Ранний выход как только всё найдено
+--         if hasBack and hasFront and hasSound then
+--             return true
+--         end
+--     end
 
-	return hasBack and hasFront and hasSound
-end
+--     return false
+-- end
+
 
 -- ====== Pick random C in zone (filtered) ======
+local cachedTokens = {}
+local cacheTime = 0
+local CACHE_LIFETIME = 0.5  -- Обновлять кэш каждые 0.5 сек
+
 local function getRandomCInZone()
-	if not tokens then return nil end
+    if not tokens then return nil end
+    
+    local now = os.clock()
+    if (now - cacheTime) >= CACHE_LIFETIME then
+        cachedTokens = {}
+        for _, obj in ipairs(tokens:GetChildren()) do
+            if obj.Name == "C" and hasRequiredStuff(obj) then
+                local pos = getObjPos(obj)
+                if pos and isPointInZone(pos) then
+                    cachedTokens[#cachedTokens + 1] = obj
+                end
+            end
+        end
+        cacheTime = now
+    end
+    
+    -- Удаляем невалидные из кэша (собранные токены)
+    for i = #cachedTokens, 1, -1 do
+        if cachedTokens[i].Parent ~= tokens then
+            table.remove(cachedTokens, i)
+        end
+    end
 
-	local list = {}
-	for _, obj in ipairs(tokens:GetChildren()) do
-		if obj.Name == "C" and hasRequiredStuff(obj) then
-			local pos = getObjPos(obj)
-			if pos and isPointInZone(pos) then
-				list[#list + 1] = obj
-			end
-		end
-	end
-
-	if #list == 0 then return nil end
-	return list[math.random(1, #list)]
+    if #cachedTokens == 0 then return nil end
+    return cachedTokens[math.random(1, #cachedTokens)]
 end
+
 
 -- ====== Movement (smooth) ======
-local STOP_RADIUS = 3.5
-local WAYPOINT_TIMEOUT = 2.8
-local FAILSAFE_MOVE_TIMEOUT = 4
 
 local function moveDirect(targetPos: Vector3, timeoutSec: number)
-	if not humanoid then return false end
-	humanoid:MoveTo(targetPos)
+    if not humanoid then return false end
+    humanoid:MoveTo(targetPos)
 
-	local done = false
-	local conn
-	conn = humanoid.MoveToFinished:Connect(function()
-		done = true
-		if conn then conn:Disconnect() end
-	end)
+    local done = false
+    local conn
+    conn = humanoid.MoveToFinished:Once(function()  -- Once вместо Connect
+        done = true
+    end)
 
-	local t = 0
-	while not done and t < timeoutSec and _G.__FARMING do
-		t += task.wait(0.05) -- IMPORTANT: no micro-spam
-	end
+    local t = 0
+    while not done and t < timeoutSec and _G.__FARMING do
+        t += task.wait(0.05)
+    end
 
-	if conn then conn:Disconnect() end
-	return done
+    conn:Disconnect()  -- Безопасно даже после Once
+    return done
 end
+
 
 local function movePath(targetPos: Vector3)
-	if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
-		return true
-	end
+    local MAX_RETRIES = 3
+    
+    for attempt = 1, MAX_RETRIES do
+        if (root.Position - targetPos).Magnitude <= STOP_RADIUS then
+            return true
+        end
+        
 
-	local path = PathfindingService:CreatePath({
-		AgentRadius = 2,
-		AgentHeight = 5,
-		AgentCanJump = true,
-		AgentJumpHeight = 7,
-		WaypointSpacing = 5, -- bigger = smoother
-	})
+        path:ComputeAsync(root.Position, targetPos)
+        if path.Status ~= Enum.PathStatus.Success then
+            return moveDirect(targetPos, FAILSAFE_MOVE_TIMEOUT)
+        end
 
-	path:ComputeAsync(root.Position, targetPos)
-	if path.Status ~= Enum.PathStatus.Success then
-		return moveDirect(targetPos, FAILSAFE_MOVE_TIMEOUT)
-	end
+        local waypoints = path:GetWaypoints()
+        local completed = true
+        
+        for _, wp in ipairs(waypoints) do
+            if not _G.__FARMING then return false end
+            if (root.Position - targetPos).Magnitude <= STOP_RADIUS then return true end
 
-	local waypoints = path:GetWaypoints()
-	for _, wp in ipairs(waypoints) do
-		if not _G.__FARMING then return false end
-		if (root.Position - targetPos).Magnitude <= STOP_RADIUS then return true end
+            humanoid:MoveTo(wp.Position)
+            if wp.Action == Enum.PathWaypointAction.Jump then
+                humanoid.Jump = true
+            end
 
-		humanoid:MoveTo(wp.Position)
-		if wp.Action == Enum.PathWaypointAction.Jump then
-			humanoid.Jump = true
-		end
+            local reached = false
+            local conn = humanoid.MoveToFinished:Once(function()
+                reached = true
+            end)
 
-		local reached = false
-		local conn
-		conn = humanoid.MoveToFinished:Connect(function()
-			reached = true
-			if conn then conn:Disconnect() end
-		end)
+            local t = 0
+            while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
+                t += task.wait(0.05)
+            end
+            conn:Disconnect()
 
-		local t = 0
-		while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
-			t += task.wait(0.05)
-		end
-		if conn then conn:Disconnect() end
-
-		-- stuck -> recompute (but not spam)
-		if not reached then
-			return movePath(targetPos)
-		end
-	end
-
-	return (root.Position - targetPos).Magnitude <= STOP_RADIUS + 1
+            if not reached then
+                completed = false
+                break  -- Выходим из внутреннего цикла, retry весь path
+            end
+        end
+        
+        if completed then
+            return (root.Position - targetPos).Magnitude <= STOP_RADIUS + 1
+        end
+    end
+    
+    return false
 end
+
 
 local function approachObject(obj)
 	local pos = getObjPos(obj)
@@ -193,7 +243,7 @@ end
 local function round1(x)
 	return math.floor(x * 10) / 10
 end
-local DEFAULT_WALKSPEED = 16
+local DEFAULT_WALKSPEED = 30
 if humanoid then DEFAULT_WALKSPEED = humanoid.WalkSpeed end
 local currentSpeed = round1(DEFAULT_WALKSPEED)
 
@@ -215,15 +265,6 @@ end
 task.spawn(function()
 	while true do
 		task.wait(0.1) -- как ты и хотел
-		if humanoid then
-			humanoid.WalkSpeed = currentSpeed
-		end
-	end
-end)
-
-task.spawn(function()
-	while true do
-		task.wait(0.1)
 		if humanoid then
 			humanoid.WalkSpeed = currentSpeed
 		end
