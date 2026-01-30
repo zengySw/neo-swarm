@@ -12,7 +12,7 @@ local Fields = {
     ["Mountain Top Field"] = {X1 = 55,  X2 = 95,  Z1 = -225, Z2 = -145, Y = 176.0},
 }
 local fieldList = {"Pine Tree Forest", "Pepper Patch", "Mountain Top Field"}
-local currentField = fieldList[1]  -- default field
+local currentField = fieldList[1]
 
 -- Table to hold current zone boundaries
 local Zone = { min = Vector3.new(0,0,0), max = Vector3.new(0,0,0) }
@@ -49,7 +49,6 @@ local function refreshCharacter()
 end
 refreshCharacter()
 player.CharacterAdded:Connect(function()
-    task.wait(0.2)
     refreshCharacter()
 end)
 
@@ -113,9 +112,7 @@ local function moveDirect(targetPos: Vector3, timeoutSec: number)
         if conn then conn:Disconnect() end
     end)
     local t = 0
-    while not done and t < timeoutSec and _G.__FARMING do
-        t += task.wait(0.05)
-    end
+
     if conn then conn:Disconnect() end
     return done
 end
@@ -154,9 +151,7 @@ local function movePath(targetPos: Vector3)
             if conn then conn:Disconnect() end
         end)
         local t = 0
-        while not reached and t < WAYPOINT_TIMEOUT and _G.__FARMING do
-            t += task.wait(0.05)
-        end
+        
         if conn then conn:Disconnect() end
         -- If stuck on this waypoint, try recomputing path (recursively)
         if not reached then
@@ -203,7 +198,6 @@ end
 -- Spawn a loop to continuously apply the current speed to Humanoid
 task.spawn(function()
     while _G.__SPEED_LOOP do
-        task.wait(0.1)
         if humanoid then
             humanoid.WalkSpeed = currentSpeed
         end
@@ -219,7 +213,6 @@ local TARGET_SWITCH_COOLDOWN = 0.1
 local function farmLoop()
     -- Move player to the center of the field once at start
     movePath(getZoneCenter())
-    task.wait(0.2)
     while _G.__FARMING do
         -- If character or humanoid was lost (e.g. died), refresh references
         if not player.Character or not humanoid or not root then
@@ -230,7 +223,6 @@ local function farmLoop()
             local pos = getObjPos(currentTarget)
             if pos and isPointInZone(pos) then
                 approachObject(currentTarget)
-                task.wait(0.1)
                 continue  -- keep farming current target
             end
         end
@@ -238,17 +230,12 @@ local function farmLoop()
         local now = os.clock()
         if (now - lastSwitch) < TARGET_SWITCH_COOLDOWN then
             -- Small cooldown to avoid rapidly switching targets
-            task.wait(0.1)
             continue
         end
         currentTarget = getRandomCInZone()
         lastSwitch = now
         if currentTarget then
             approachObject(currentTarget)
-            task.wait(0.1)
-        else
-            -- No token available in zone, wait a bit before retrying
-            task.wait(0.25)
         end
     end
 end
