@@ -185,7 +185,7 @@ end
 local function round1(x)  -- helper to round to 1 decimal place
     return math.floor(x * 10) / 10
 end
-local DEFAULT_WALKSPEED = 30
+local DEFAULT_WALKSPEED = 16
 if humanoid then
     DEFAULT_WALKSPEED = humanoid.WalkSpeed
 end
@@ -203,7 +203,7 @@ end
 -- Spawn a loop to continuously apply the current speed to Humanoid
 task.spawn(function()
     while _G.__SPEED_LOOP do
-        task.wait(0.001)
+        task.wait(0.1)
         if humanoid then
             humanoid.WalkSpeed = currentSpeed
         end
