@@ -112,7 +112,10 @@ local function moveDirect(targetPos: Vector3, timeoutSec: number)
         if conn then conn:Disconnect() end
     end)
     local t = 0
-
+    while not done and t < timeoutSec do
+        task.wait(0.1)
+        t = t + 0.1
+    end
     if conn then conn:Disconnect() end
     return done
 end
@@ -151,7 +154,10 @@ local function movePath(targetPos: Vector3)
             if conn then conn:Disconnect() end
         end)
         local t = 0
-        
+        while not reached and t < WAYPOINT_TIMEOUT do
+            task.wait(0.1)
+            t = t + 0.1
+        end
         if conn then conn:Disconnect() end
         -- If stuck on this waypoint, try recomputing path (recursively)
         if not reached then
